@@ -1,6 +1,6 @@
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import process, user
+from app.api import process, test, user
 # from app.db.database import connect_to_mongo, close_mongo_connection
 
 app = FastAPI()
@@ -26,7 +26,7 @@ app.add_middleware(
 
 backend_router = APIRouter()
 
-backend_router.include_router(user.router, prefix="/test", tags=["test"])
+backend_router.include_router(test.router, prefix="/test", tags=["test"])
 backend_router.include_router(user.router, prefix="/users", tags=["users"])
 backend_router.include_router(process.router, prefix="/process", tags=["process"])
 

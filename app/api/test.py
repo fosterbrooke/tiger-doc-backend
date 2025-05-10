@@ -2,6 +2,6 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-@router.post("")
+@router.get("")
 async def test_endpoint():
     return {"status": "success"}
