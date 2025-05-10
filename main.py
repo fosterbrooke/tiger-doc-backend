@@ -26,6 +26,7 @@ app.add_middleware(
 
 backend_router = APIRouter()
 
+backend_router.include_router(user.router, prefix="/test", tags=["test"])
 backend_router.include_router(user.router, prefix="/users", tags=["users"])
 backend_router.include_router(process.router, prefix="/process", tags=["process"])
 
