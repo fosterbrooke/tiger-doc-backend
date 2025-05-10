@@ -2,7 +2,7 @@ docx2pdf==0.1.8
 fastapi==0.115.12
 lxml==5.4.0
 openai==1.78.0
-passlib==1.7.4
+passlib[bcrypt]
 pydantic==2.11.4
 pydantic_settings==2.9.1
 python-dotenv==1.1.0
@@ -11,3 +11,4 @@ SQLAlchemy==2.0.40
 uvicorn==0.20.0
 gunicorn==20.1.0
 python-multipart
+pydantic[email]
