@@ -18,7 +18,7 @@ async def shutdown_db_client():
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["localhost:5173", "jolly-coast-0bde53b03.6.azurestaticapps.net"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
