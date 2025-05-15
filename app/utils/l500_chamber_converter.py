@@ -5,7 +5,7 @@ from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 import zipfile
 from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT, WD_ALIGN_PARAGRAPH, WD_UNDERLINE
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_UNDERLINE, WD_LINE_SPACING
 import sys
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 import re
