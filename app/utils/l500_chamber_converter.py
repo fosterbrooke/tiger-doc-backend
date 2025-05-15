@@ -54,89 +54,170 @@ def extract_specific_textbox_text(docx_file, textbox_index):
         return None
 
 def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_index, source_col_index,
-                                     target_doc, target_table_index, target_row_index, target_col_index):
+                                    target_doc, target_table_index, target_row_index, target_col_index):
+    """
+    Copies cell content with formatting from one cell to another cell in a target Document object.
+    """
     try:
-        source_xml_content = source_doc.part.blob
-        source_tree = etree.fromstring(source_xml_content)
-        ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
-
-        source_tables = source_tree.xpath('//w:tbl', namespaces=ns)
-        if source_table_index < 0 or source_table_index >= len(source_tables):
+        # ===== TARGET CELL VALIDATION =====
+        if not hasattr(target_doc, 'tables') or target_table_index >= len(target_doc.tables) or target_table_index < 0:
+            print(f"Error: Target table index {target_table_index} out of range (0-{len(target_doc.tables)-1})")
             return False
-
-        source_target_cell = source_tables[source_table_index].xpath('.//w:tr', namespaces=ns)[source_row_index].xpath('.//w:tc', namespaces=ns)[source_col_index]
-        source_paragraphs = source_target_cell.xpath('.//w:p', namespaces=ns)
-
-        target_tables = target_doc.tables
-        if target_table_index < 0 or target_table_index >= len(target_tables):
+            
+        target_table = target_doc.tables[target_table_index]
+        if target_row_index >= len(target_table.rows) or target_row_index < 0:
+            print(f"Error: Target row index {target_row_index} out of range (0-{len(target_table.rows)-1})")
             return False
-
-        target_table = target_tables[target_table_index]
-        target_cell = target_table.rows[target_row_index].cells[target_col_index]
-        target_cell.text = ""
-
-        def _copy_num_definition(source_doc, target_doc, numId_val):
+            
+        target_row = target_table.rows[target_row_index]
+        if target_col_index >= len(target_row.cells) or target_col_index < 0:
+            print(f"Error: Target column index {target_col_index} out of range (0-{len(target_row.cells)-1})")
+            return False
+            
+        target_cell = target_row.cells[target_col_index]
+        
+        # ===== SOURCE CONTENT EXTRACTION =====
+        try:
             source_xml_content = source_doc.part.blob
             source_tree = etree.fromstring(source_xml_content)
-            ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        except Exception as e:
+            print(f"Error parsing source document XML: {str(e)}")
+            return False
 
-            source_num_definition = source_tree.xpath(f'//w:numbering/w:num[@w:numId="{numId_val}"]', namespaces=ns)
-            if source_num_definition:
-                source_num_definition_xml = etree.tostring(source_num_definition[0], encoding='unicode')
+        ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        
+        # ===== SOURCE CELL VALIDATION =====
+        source_tables = source_tree.xpath('//w:tbl', namespaces=ns)
+        if source_table_index >= len(source_tables) or source_table_index < 0:
+            print(f"Error: Source table index {source_table_index} out of range (0-{len(source_tables)-1})")
+            return False
 
-                target_xml_content = target_doc.part.blob
-                target_tree = etree.fromstring(target_xml_content)
-                target_numbering = target_tree.find('.//w:numbering', namespaces=ns)
+        source_rows = source_tables[source_table_index].xpath('.//w:tr', namespaces=ns)
+        if source_row_index >= len(source_rows) or source_row_index < 0:
+            print(f"Error: Source row index {source_row_index} out of range (0-{len(source_rows)-1})")
+            return False
 
-                if target_numbering is None:
-                    target_numbering = etree.SubElement(target_tree.find('.//w:body', namespaces=ns), qn('w:numbering'))
+        source_cells = source_rows[source_row_index].xpath('.//w:tc', namespaces=ns)
+        if source_col_index >= len(source_cells) or source_col_index < 0:
+            print(f"Error: Source column index {source_col_index} out of range (0-{len(source_cells)-1})")
+            return False
 
-                target_num_definitions = target_numbering.xpath(f'./w:num[@w:numId="{numId_val}"]', namespaces=ns)
-                if not target_num_definitions:
-                    target_num_definition = parse_xml(source_num_definition_xml)
-                    target_numbering.append(target_num_definition)
+        source_cell = source_cells[source_col_index]
+        source_paragraphs = source_cell.xpath('.//w:p', namespaces=ns)
+        
+        # ===== CONTENT COPYING =====
+        target_cell.text = ""  # Clear target cell
 
-                    source_abstractNumId = source_num_definition[0].xpath('./w:abstractNumId', namespaces=ns)[0].get(qn('w:val'))
-                    source_abstractNum = source_tree.xpath(f'//w:numbering/w:abstractNum[@w:abstractNumId="{source_abstractNumId}"]', namespaces=ns)[0]
-                    source_abstractNum_xml = etree.tostring(source_abstractNum, encoding='unicode')
-                    target_abstractNum = parse_xml(source_abstractNum_xml)
-                    target_numbering.append(target_abstractNum)
-
-                    target_doc.part._blob = etree.tostring(target_tree)
 
         first_paragraph = True
-        for paragraph in source_paragraphs:
-            new_paragraph = target_cell.add_paragraph() if not first_paragraph else target_cell.paragraphs[0]
-            first_paragraph = False
-
+        n = 0
+        pre_left = ''
+        pre_hanging = ''
+        for i, paragraph in enumerate(source_paragraphs):
+            
+            # Create or get paragraph
+            if first_paragraph:
+                new_paragraph = target_cell.paragraphs[0]
+                first_paragraph = False
+            else:
+                new_paragraph = target_cell.add_paragraph()
+                    
+            # Copy paragraph formatting
             ppr = paragraph.find('.//w:pPr', namespaces=ns)
             if ppr is not None:
-                pStyle = ppr.find('./w:pStyle', namespaces=ns)
-                if pStyle is not None:
-                    new_pPr = new_paragraph._p.get_or_add_pPr()
-                    new_pStyle = etree.SubElement(new_pPr, qn('w:pStyle'), {qn('w:val'): pStyle.get(qn('w:val'))})
-
-                numpr = paragraph.find('.//w:numPr', namespaces=ns)
+                new_ppr = new_paragraph._element.get_or_add_pPr()
+                
+                numpr = ppr.find('.//w:numPr', namespaces=ns)
                 if numpr is not None:
-                    ilvl = numpr.find('.//w:ilvl', namespaces=ns)
-                    numId = numpr.find('.//w:numId', namespaces=ns)
-                    if ilvl is not None and numId is not None:
-                        try:
-                            new_pPr = new_paragraph._p.get_or_add_pPr()
-                            new_numPr = etree.SubElement(new_pPr, qn('w:numPr'))
-                            etree.SubElement(new_numPr, qn('w:ilvl'), {qn('w:val'): ilvl.get(qn('w:val'))})
-                            etree.SubElement(new_numPr, qn('w:numId'), {qn('w:val'): '1'})
+                    try:
+                        ilvl = numpr.find('.//w:ilvl', namespaces=ns)
+                        numId = numpr.find('.//w:numId', namespaces=ns)
+                        if ilvl is not None and numId is not None:
+                            # new_paragraph.paragraph_format.left_indent = Pt(18 * int(ilvl.get(qn('w:val'))) + 35)
+                            new_numpr = etree.SubElement(new_ppr, qn('w:numPr'))
+                            etree.SubElement(new_numpr, qn('w:ilvl'), {qn('w:val'): ilvl.get(qn('w:val'))})
+                            etree.SubElement(new_numpr, qn('w:numId'), {qn('w:val'): '1'})
+                    except Exception as e:
+                        print(f"Warning: Could not copy numbering - {str(e)}")
+                
+                rpr = ppr.find('.//w:rPr', namespaces=ns)
+                if rpr is not None:
+                    color = rpr.find('.//w:color', namespaces=ns)
+                    if color is not None:
+                        if not new_paragraph.runs:
+                            new_paragraph.add_run('')
+                        
+                        for run in new_paragraph.runs:
+                            rPr = run._r.get_or_add_rPr()
+                            etree.SubElement(rPr, qn('w:color'), {qn('w:val'): color.get(qn('w:val'))})
+                
+                # Copy the pStyle if it exists
+                pstyle = ppr.find('.//w:pStyle', namespaces=ns)
+                if pstyle is not None:
+                    
+                    new_style = etree.SubElement(new_ppr, qn('w:pStyle'))
+                    style_name = pstyle.get(qn('w:val'))
+                    new_style.set(qn('w:val'), style_name)
+                    
+                # indent handling
+                ind = ppr.find('.//w:ind', namespaces=ns)
+                if ind is not None and numpr is None:
+                    new_ind = etree.SubElement(new_ppr, qn('w:ind'))
+                    
+                    left = ind.get(qn('w:left'))
+                    # print(type(left))
+                    if left is not None:
+                        new_ind.set(qn('w:left'), left)
+                        pre_left = left
+                        n = i
+                    hanging = ind.get(qn('w:hanging'))
+                    if hanging is not None:
+                        new_ind.set(qn('w:hanging'), hanging)
+                        pre_hanging = hanging
+                    
+                
+                if i == n + 1 and numpr is None:
+                    # Create new indentation element
+                    new_ind = etree.SubElement(new_ppr, qn('w:ind'))
+                    if pre_left is not None:
+                        new_ind.set(qn('w:left'), pre_left)
+                    if pre_hanging is not None:
+                        new_ind.set(qn('w:hanging'), pre_hanging)
+                
+                # Spacing handling
+                spacing = ppr.find('.//w:spacing', namespaces=ns)
+                is_last_paragraph = (i == len(source_paragraphs) - 1)
+                is_empty = not paragraph.xpath('.//w:r/w:t', namespaces=ns)
 
-                            new_paragraph.paragraph_format.left_indent = Pt(18 * int(ilvl.get(qn('w:val'))) + 20 + int(pStyle.get(qn('w:val'))))
+                if spacing is not None:
+                    # Space before
+                    before = spacing.get(qn('w:before'))
+                    if before is not None:
+                        new_paragraph.paragraph_format.space_before = Pt(min(int(before)/20, 6))  # Max 6pt
+                    
+                    # Space after (none for last paragraph)
+                    after = spacing.get(qn('w:after'))
+                    if after is not None and not is_last_paragraph:
+                        new_paragraph.paragraph_format.space_after = Pt(min(int(after)/20, 6))  # Max 6pt
+                    else:
+                        new_paragraph.paragraph_format.space_after = Pt(0)
 
-                            source_numId_val = numId.get(qn('w:val'))
-                            _copy_num_definition(source_doc, target_doc, source_numId_val)
-                        except (ValueError, TypeError, IndexError, AttributeError):
-                            pass
+                    # Line spacing
+                    line = spacing.get(qn('w:line'))
+                    if line is not None:
+                        line_rule = spacing.get(qn('w:lineRule'), 'auto')
+                        line_val = int(line)
+                        if line_rule == 'exact':
+                            new_paragraph.paragraph_format.line_spacing = Pt(line_val/20)
+                        elif line_rule == 'atLeast':
+                            new_paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+                            new_paragraph.paragraph_format.line_spacing = Pt(line_val/20)
+                        else:  # auto or multiple
+                            new_paragraph.paragraph_format.line_spacing = line_val/240  # 240 = 12pt*20
+                else:
+                    new_paragraph.paragraph_format.space_after = Pt(0)
 
-                new_paragraph.paragraph_format.space_before = Pt(2)
-                new_paragraph.paragraph_format.space_after = Pt(2)
-
+            # Hyperlink detection and processing
             is_hyperlink = False
             hyperlink_url = None
             hyperlink_text_runs = []
@@ -151,6 +232,7 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                 text_element = run.find('./w:t', namespaces=ns)
                 rpr = run.find('./w:rPr', namespaces=ns)
                 
+                # Check for hyperlink style in runs
                 if rpr is not None:
                     rstyle = rpr.find('./w:rStyle', namespaces=ns)
                     if rstyle is not None:
@@ -162,26 +244,31 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                     hyperlink_text_runs = []
 
                 elif is_hyperlink and instr_text is not None and 'HYPERLINK' in instr_text.text:
+                    # Extract URL from HYPERLINK field instruction
                     match = re.search(r'HYPERLINK\s+"([^"]*)"', instr_text.text)
                     if match:
                         hyperlink_url = match.group(1).strip()
 
                 elif is_hyperlink and fld_char_separate is not None:
+                    # The actual hyperlink text will come after the separate tag
                     continue
 
                 elif is_hyperlink and text_element is not None:
                     hyperlink_text_runs.append(run)
 
                 elif is_hyperlink and fld_char_end is not None:
+                # End of hyperlink - process collected runs
                     hyperlink_text = "".join([t.text for r in hyperlink_text_runs 
                                             if (t := r.find('./w:t', namespaces=ns)) is not None])
                     if hyperlink_url and hyperlink_text:
+                        # Create begin field char
                         begin_r = OxmlElement('w:r')
                         begin_fldChar = OxmlElement('w:fldChar')
                         begin_fldChar.set(qn('w:fldCharType'), 'begin')
                         begin_r.append(begin_fldChar)
                         new_paragraph._p.append(begin_r)
                         
+                        # Create instrText run
                         instr_r = OxmlElement('w:r')
                         instr_text = OxmlElement('w:instrText')
                         instr_text.set(qn('xml:space'), 'preserve')
@@ -189,26 +276,30 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                         instr_r.append(instr_text)
                         new_paragraph._p.append(instr_r)
                         
+                        # Create separate field char
                         separate_r = OxmlElement('w:r')
                         separate_fldChar = OxmlElement('w:fldChar')
                         separate_fldChar.set(qn('w:fldCharType'), 'separate')
                         separate_r.append(separate_fldChar)
                         new_paragraph._p.append(separate_r)
                         
+                        # Create hyperlink text run with style
                         text_r = OxmlElement('w:r')
                         rPr = OxmlElement('w:rPr')
                         
+                        # Add hyperlink style if exists
                         if hyperlink_style:
                             rStyle = OxmlElement('w:rStyle')
                             rStyle.set(qn('w:val'), hyperlink_style)
                             rPr.append(rStyle)
                         
+                        # Add formatting elements
                         font_size = OxmlElement('w:sz')
-                        font_size.set(qn('w:val'), '22')
+                        font_size.set(qn('w:val'), '22')  # 11pt = 22 half-points
                         rPr.append(font_size)
                         
                         color = OxmlElement('w:color')
-                        color.set(qn('w:val'), '0000FF')
+                        color.set(qn('w:val'), '0000FF')  # Blue
                         rPr.append(color)
                         
                         underline = OxmlElement('w:u')
@@ -221,6 +312,7 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                         text_r.append(t)
                         new_paragraph._p.append(text_r)
                         
+                        # Create end field char with same formatting
                         end_r = OxmlElement('w:r')
                         end_rPr = OxmlElement('w:rPr')
                         
@@ -229,6 +321,7 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                             end_rStyle.set(qn('w:val'), hyperlink_style)
                             end_rPr.append(end_rStyle)
                         
+                        # Recreate formatting elements for end run
                         end_font_size = OxmlElement('w:sz')
                         end_font_size.set(qn('w:val'), '22')
                         end_rPr.append(end_font_size)
@@ -252,11 +345,14 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
 
                     new_run = new_paragraph.add_run(text)
                     
+                    # Font name and size
                     new_run.font.name = "Times New Roman"
                     new_run.font.size = Pt(11)
-                    
+                    # Copy run formatting
                     rpr = run.find('.//w:rPr', namespaces=ns)
                     if rpr is not None:
+                        
+                        # Color
                         color_element = rpr.find('.//w:color', namespaces=ns)
                         if color_element is not None and color_element.get(qn('w:val')):
                             color_hex = color_element.get(qn('w:val'))
@@ -265,6 +361,7 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                             except ValueError:
                                 pass
 
+                        # Bold and italic
                         if rpr.find('.//w:b', namespaces=ns) is not None:
                             new_run.bold = True
                         if rpr.find('.//w:i', namespaces=ns) is not None:
@@ -273,6 +370,7 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                         underline_element = rpr.find('.//w:u', namespaces=ns)
                         if underline_element is not None:
                             underline_val = underline_element.get(qn('w:val'))
+                            # Map Word's underline values to WD_UNDERLINE
                             underline_mapping = {
                                 'single': WD_UNDERLINE.SINGLE,
                                 'double': WD_UNDERLINE.DOUBLE,
@@ -284,9 +382,11 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                                 'wave': WD_UNDERLINE.WAVY,
                                 'none': WD_UNDERLINE.NONE,
                             }
+                            # Default to SINGLE if not specified or invalid
                             underline_style = underline_mapping.get(underline_val, WD_UNDERLINE.SINGLE)
                             new_run.font.underline = underline_style
 
+                            # Underline color (if specified)
                             underline_color = underline_element.get(qn('w:color'))
                             if underline_color:
                                 try:
@@ -784,8 +884,7 @@ async def l500_chamber_convert(source_docx_path, target_docx_path):
     nextGenerationPartner_indices = []
     leadingPartner_indices = find_tables_with_specific_string(source_doc, search_string="Partner: leading partner")
     leadingPartner_indices += find_tables_with_specific_string(source_doc, search_string="Partner: leading individual")
-    nextGenerationPartner_indices = find_tables_with_specific_string(source_doc, search_string="Partner: next generation partner")
-    nextGenerationPartner_indices += find_tables_with_specific_string(source_doc, search_string="Partner: next generation")
+    nextGenerationPartner_indices = find_tables_with_specific_string(source_doc, search_string="Partner: next generation")
     leadingAssociate_indices = find_tables_with_specific_string(source_doc, search_string="Associate: leading associate")
     leadingAssociate_indices += find_tables_with_specific_string(source_doc, search_string="Associate: rising star")
     # print(leadingAssociate_indices)
@@ -874,45 +973,81 @@ async def l500_chamber_convert(source_docx_path, target_docx_path):
     for i in range(9):
         delete_table_with_paragraphs(target_doc, 16, num_paragraphs_above=0, num_paragraphs_below=3)
     
-    for i in range(publishable_matter_list_length - 1):
-        copy_table_with_paragraphs(target_doc, 13, target_doc, 13, num_paragraphs_above=0, num_paragraphs_below=0)
-
-    for i in range(publishable_matter_list_length - 1):
-        add_page_break_before_table(target_doc, 14 + i)  
-    
-    for i in range(publishable_matter_list_length):
-        temp_text1 = ""
-        if i == 0:
-            temp_text1 = "Publishable Work Highlights in last 12 months"
-        temp_text2 = "Publishable Matter " + str(i + 1)
-        write_text_to_cell(target_doc, 13 + i, 0, 0, temp_text1, 13, alignment="left")
-        write_text_to_cell(target_doc, 13 + i, 1, 0, temp_text2, 14, alignment="center")
-  
-    for i in range(non_publishable_matter_list_length - 1):
-        copy_table_with_paragraphs(target_doc, 14 + publishable_matter_list_length, target_doc, 14 + publishable_matter_list_length, num_paragraphs_above=0, num_paragraphs_below=0)
+    if publishable_matter_list_length == 0 and non_publishable_matter_list_length != 0:
+        delete_table_with_paragraphs(target_doc, 13, num_paragraphs_above=0, num_paragraphs_below=3)
+        delete_table_with_paragraphs(target_doc, 12, num_paragraphs_above=8, num_paragraphs_below=0)
+        for i in range(non_publishable_matter_list_length - 1):
+            copy_table_with_paragraphs(target_doc, 13, target_doc, 14, num_paragraphs_above=0, num_paragraphs_below=0)
+            
+        for i in range(non_publishable_matter_list_length - 2):
+            add_page_break_before_table(target_doc, 15 + i)  
+            
+        for i in range(non_publishable_matter_list_length):
+            temp_text1 = ""
+            if i == 0:
+                temp_text1 = "Confidential Work Highlights in last 12 months"
+            temp_text2 = "Confidential Matter " + str(i + 1)
+            write_text_to_cell(target_doc, 13 + i, 0, 0, temp_text1, 13, alignment="left")
+            write_text_to_cell(target_doc, 13 + i, 1, 0, temp_text2, 14, alignment="center") 
         
-    for i in range(non_publishable_matter_list_length - 1):
-        add_page_break_before_table(target_doc, 15 + publishable_matter_list_length + i)  
-          
-    for i in range(non_publishable_matter_list_length):
-        temp_text1 = ""
-        if i == 0:
-            temp_text1 = "Confidential Work Highlights in last 12 months"
-        temp_text2 = "Confidential Matter " + str(i + 1)
-        write_text_to_cell(target_doc, 14 + publishable_matter_list_length + i, 0, 0, temp_text1, 13, alignment="left")
-        write_text_to_cell(target_doc, 14 + publishable_matter_list_length + i, 1, 0, temp_text2, 14, alignment="center")        
+        for i in range(non_publishable_matter_list_length):
+            copy_publishable_matter_to_target(source_doc, target_doc, non_publishable_matter_indices[i], 13 + i)
     
-                
-         
-    for i in range(publishable_matter_list_length):
-        copy_publishable_matter_to_target(source_doc, target_doc, publishable_matter_indices[i], 13 + i)
+    elif publishable_matter_list_length != 0 and non_publishable_matter_list_length == 0:
+        delete_table_with_paragraphs(target_doc, 15, num_paragraphs_above=0, num_paragraphs_below=3)
+        delete_table_with_paragraphs(target_doc, 14, num_paragraphs_above=8, num_paragraphs_below=0)
+        for i in range(publishable_matter_list_length - 1):
+            copy_table_with_paragraphs(target_doc, 13, target_doc, 13, num_paragraphs_above=0, num_paragraphs_below=0)
+
+        for i in range(publishable_matter_list_length - 1):
+            add_page_break_before_table(target_doc, 14 + i)  
+        
+        for i in range(publishable_matter_list_length):
+            temp_text1 = ""
+            if i == 0:
+                temp_text1 = "Publishable Work Highlights in last 12 months"
+            temp_text2 = "Publishable Matter " + str(i + 1)
+            write_text_to_cell(target_doc, 13 + i, 0, 0, temp_text1, 13, alignment="left")
+            write_text_to_cell(target_doc, 13 + i, 1, 0, temp_text2, 14, alignment="center")
+        
+        for i in range(publishable_matter_list_length):
+            copy_publishable_matter_to_target(source_doc, target_doc, publishable_matter_indices[i], 13 + i)
+        
+    else:    
+        for i in range(publishable_matter_list_length - 1):
+            copy_table_with_paragraphs(target_doc, 13, target_doc, 13, num_paragraphs_above=0, num_paragraphs_below=0)
+
+        for i in range(publishable_matter_list_length - 1):
+            add_page_break_before_table(target_doc, 14 + i)  
+        
+        for i in range(publishable_matter_list_length):
+            temp_text1 = ""
+            if i == 0:
+                temp_text1 = "Publishable Work Highlights in last 12 months"
+            temp_text2 = "Publishable Matter " + str(i + 1)
+            write_text_to_cell(target_doc, 13 + i, 0, 0, temp_text1, 13, alignment="left")
+            write_text_to_cell(target_doc, 13 + i, 1, 0, temp_text2, 14, alignment="center")
     
-    # print(publishable_matter_indices)
-    # Extract Non-publishable Matter
-    
-    
-    for i in range(non_publishable_matter_list_length):
-        copy_publishable_matter_to_target(source_doc, target_doc, non_publishable_matter_indices[i], 14 + publishable_matter_list_length + i)
+        for i in range(non_publishable_matter_list_length - 1):
+            copy_table_with_paragraphs(target_doc, 14 + publishable_matter_list_length, target_doc, 14 + publishable_matter_list_length, num_paragraphs_above=0, num_paragraphs_below=0)
+            
+        for i in range(non_publishable_matter_list_length - 1):
+            add_page_break_before_table(target_doc, 15 + publishable_matter_list_length + i)  
+            
+        for i in range(non_publishable_matter_list_length):
+            temp_text1 = ""
+            if i == 0:
+                temp_text1 = "Confidential Work Highlights in last 12 months"
+            temp_text2 = "Confidential Matter " + str(i + 1)
+            write_text_to_cell(target_doc, 14 + publishable_matter_list_length + i, 0, 0, temp_text1, 13, alignment="left")
+            write_text_to_cell(target_doc, 14 + publishable_matter_list_length + i, 1, 0, temp_text2, 14, alignment="center")        
+     
+        for i in range(publishable_matter_list_length):
+            copy_publishable_matter_to_target(source_doc, target_doc, publishable_matter_indices[i], 13 + i)
+        
+        for i in range(non_publishable_matter_list_length):
+            copy_publishable_matter_to_target(source_doc, target_doc, non_publishable_matter_indices[i], 14 + publishable_matter_list_length + i)
+        
         
     # Save the modified target document
     file_name_without_extension = os.path.splitext(source_docx_path)[0]
