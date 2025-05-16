@@ -330,7 +330,7 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                             # new_paragraph.paragraph_format.left_indent = Pt(18 * int(ilvl.get(qn('w:val'))) + 35)
                             new_numpr = etree.SubElement(new_ppr, qn('w:numPr'))
                             etree.SubElement(new_numpr, qn('w:ilvl'), {qn('w:val'): ilvl.get(qn('w:val'))})
-                            etree.SubElement(new_numpr, qn('w:numId'), {qn('w:val'): '1'})
+                            etree.SubElement(new_numpr, qn('w:numId'), {qn('w:val'): '2'})
                     except Exception as e:
                         print(f"Warning: Could not copy numbering - {str(e)}")
                 
