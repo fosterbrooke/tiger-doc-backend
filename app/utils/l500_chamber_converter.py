@@ -80,11 +80,14 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
         try:
             source_xml_content = source_doc.part.blob
             source_tree = etree.fromstring(source_xml_content)
+            
         except Exception as e:
             print(f"Error parsing source document XML: {str(e)}")
             return False
 
-        ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+              'wp': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+              'xml': 'http://www.w3.org/XML/1998/namespace'}
         
         # ===== SOURCE CELL VALIDATION =====
         source_tables = source_tree.xpath('//w:tbl', namespaces=ns)
@@ -217,187 +220,277 @@ def copy_cell_content_to_target_cell(source_doc, source_table_index, source_row_
                 else:
                     new_paragraph.paragraph_format.space_after = Pt(0)
 
-            # Hyperlink detection and processing
-            is_hyperlink = False
-            hyperlink_url = None
-            hyperlink_text_runs = []
-            hyperlink_style = None
-
-            runs_in_paragraph = paragraph.xpath('./w:r', namespaces=ns)
-            for i, run in enumerate(runs_in_paragraph):
-                fld_char_begin = run.find('./w:fldChar[@w:fldCharType="begin"]', namespaces=ns)
-                instr_text = run.find('./w:instrText', namespaces=ns)
-                fld_char_separate = run.find('./w:fldChar[@w:fldCharType="separate"]', namespaces=ns)
-                fld_char_end = run.find('./w:fldChar[@w:fldCharType="end"]', namespaces=ns)
-                text_element = run.find('./w:t', namespaces=ns)
-                rpr = run.find('./w:rPr', namespaces=ns)
-                
-                # Check for hyperlink style in runs
-                if rpr is not None:
-                    rstyle = rpr.find('./w:rStyle', namespaces=ns)
-                    if rstyle is not None:
-                        hyperlink_style = rstyle.get(qn('w:val'))
-
-                if fld_char_begin is not None:
-                    is_hyperlink = True
-                    hyperlink_url = None
-                    hyperlink_text_runs = []
-
-                elif is_hyperlink and instr_text is not None and 'HYPERLINK' in instr_text.text:
-                    # Extract URL from HYPERLINK field instruction
-                    match = re.search(r'HYPERLINK\s+"([^"]*)"', instr_text.text)
-                    if match:
-                        hyperlink_url = match.group(1).strip()
-
-                elif is_hyperlink and fld_char_separate is not None:
-                    # The actual hyperlink text will come after the separate tag
-                    continue
-
-                elif is_hyperlink and text_element is not None:
-                    hyperlink_text_runs.append(run)
-
-                elif is_hyperlink and fld_char_end is not None:
-                # End of hyperlink - process collected runs
-                    hyperlink_text = "".join([t.text for r in hyperlink_text_runs 
-                                            if (t := r.find('./w:t', namespaces=ns)) is not None])
-                    if hyperlink_url and hyperlink_text:
-                        # Create begin field char
-                        begin_r = OxmlElement('w:r')
-                        begin_fldChar = OxmlElement('w:fldChar')
-                        begin_fldChar.set(qn('w:fldCharType'), 'begin')
-                        begin_r.append(begin_fldChar)
-                        new_paragraph._p.append(begin_r)
-                        
-                        # Create instrText run
-                        instr_r = OxmlElement('w:r')
-                        instr_text = OxmlElement('w:instrText')
-                        instr_text.set(qn('xml:space'), 'preserve')
-                        instr_text.text = f' HYPERLINK "{hyperlink_url}" '
-                        instr_r.append(instr_text)
-                        new_paragraph._p.append(instr_r)
-                        
-                        # Create separate field char
-                        separate_r = OxmlElement('w:r')
-                        separate_fldChar = OxmlElement('w:fldChar')
-                        separate_fldChar.set(qn('w:fldCharType'), 'separate')
-                        separate_r.append(separate_fldChar)
-                        new_paragraph._p.append(separate_r)
-                        
-                        # Create hyperlink text run with style
-                        text_r = OxmlElement('w:r')
-                        rPr = OxmlElement('w:rPr')
-                        
-                        # Add hyperlink style if exists
-                        if hyperlink_style:
-                            rStyle = OxmlElement('w:rStyle')
-                            rStyle.set(qn('w:val'), hyperlink_style)
-                            rPr.append(rStyle)
-                        
-                        # Add formatting elements
-                        font_size = OxmlElement('w:sz')
-                        font_size.set(qn('w:val'), '22')  # 11pt = 22 half-points
-                        rPr.append(font_size)
-                        
-                        color = OxmlElement('w:color')
-                        color.set(qn('w:val'), '0000FF')  # Blue
-                        rPr.append(color)
-                        
-                        underline = OxmlElement('w:u')
-                        underline.set(qn('w:val'), 'single')
-                        rPr.append(underline)
-                        
-                        text_r.append(rPr)
-                        t = OxmlElement('w:t')
-                        t.text = hyperlink_text
-                        text_r.append(t)
-                        new_paragraph._p.append(text_r)
-                        
-                        # Create end field char with same formatting
-                        end_r = OxmlElement('w:r')
-                        end_rPr = OxmlElement('w:rPr')
-                        
-                        if hyperlink_style:
-                            end_rStyle = OxmlElement('w:rStyle')
-                            end_rStyle.set(qn('w:val'), hyperlink_style)
-                            end_rPr.append(end_rStyle)
-                        
-                        # Recreate formatting elements for end run
-                        end_font_size = OxmlElement('w:sz')
-                        end_font_size.set(qn('w:val'), '22')
-                        end_rPr.append(end_font_size)
-                        
-                        end_color = OxmlElement('w:color')
-                        end_color.set(qn('w:val'), '0000FF')
-                        end_rPr.append(end_color)
-                        
-                        end_underline = OxmlElement('w:u')
-                        end_underline.set(qn('w:val'), 'single')
-                        end_rPr.append(end_underline)
-                        
-                        end_r.append(end_rPr)
-                        end_fldChar = OxmlElement('w:fldChar')
-                        end_fldChar.set(qn('w:fldCharType'), 'end')
-                        end_r.append(end_fldChar)
-                        new_paragraph._p.append(end_r)
-
-                elif not is_hyperlink and text_element is not None:
-                    text = text_element.text
-
-                    new_run = new_paragraph.add_run(text)
-                    
-                    # Font name and size
-                    new_run.font.name = "Times New Roman"
-                    new_run.font.size = Pt(11)
-                    # Copy run formatting
-                    rpr = run.find('.//w:rPr', namespaces=ns)
-                    if rpr is not None:
-                        
-                        # Color
-                        color_element = rpr.find('.//w:color', namespaces=ns)
-                        if color_element is not None and color_element.get(qn('w:val')):
-                            color_hex = color_element.get(qn('w:val'))
-                            try:
-                                new_run.font.color.rgb = RGBColor.from_string(color_hex)
-                            except ValueError:
-                                pass
-
-                        # Bold and italic
-                        if rpr.find('.//w:b', namespaces=ns) is not None:
-                            new_run.bold = True
-                        if rpr.find('.//w:i', namespaces=ns) is not None:
-                            new_run.italic = True
-                            
-                        underline_element = rpr.find('.//w:u', namespaces=ns)
-                        if underline_element is not None:
-                            underline_val = underline_element.get(qn('w:val'))
-                            # Map Word's underline values to WD_UNDERLINE
-                            underline_mapping = {
-                                'single': WD_UNDERLINE.SINGLE,
-                                'double': WD_UNDERLINE.DOUBLE,
-                                'thick': WD_UNDERLINE.THICK,
-                                'dotted': WD_UNDERLINE.DOTTED,
-                                'dash': WD_UNDERLINE.DASH,
-                                'dotDash': WD_UNDERLINE.DOT_DASH,
-                                'dotDotDash': WD_UNDERLINE.DOT_DOT_DASH,
-                                'wave': WD_UNDERLINE.WAVY,
-                                'none': WD_UNDERLINE.NONE,
-                            }
-                            # Default to SINGLE if not specified or invalid
-                            underline_style = underline_mapping.get(underline_val, WD_UNDERLINE.SINGLE)
-                            new_run.font.underline = underline_style
-
-                            # Underline color (if specified)
-                            underline_color = underline_element.get(qn('w:color'))
-                            if underline_color:
-                                try:
-                                    new_run.font.underline_color.rgb = RGBColor.from_string(underline_color)
-                                except ValueError:
-                                    pass
+            process_paragraph(paragraph, new_paragraph, ns)
+            
         return True
 
     except Exception as e:
         print(f"Error: {e}")
         return False
+
+def process_paragraph(paragraph, new_paragraph, ns):
+    # Track both types of hyperlinks
+    in_field_hyperlink = False
+    in_modern_hyperlink = False
+    hyperlink_data = {
+        'url': None,
+        'text_runs': [],
+        'style': None
+    }
+    
+    # Process all elements in original order
+    for element in paragraph.xpath('./*', namespaces=ns):
+        # Reset modern hyperlink flag at start of each element
+        in_modern_hyperlink = False
+        
+        # Check for modern hyperlink (w:hyperlink element)
+        if element.tag.endswith('}hyperlink'):
+            process_modern_hyperlink(element, new_paragraph, ns)
+            in_modern_hyperlink = True
+            continue
+        
+        # Check for field-based hyperlink (legacy format)
+        if element.tag.endswith('}r'):
+            run = element
+            fld_char_begin = run.find('.//w:fldChar[@w:fldCharType="begin"]', namespaces=ns)
+            instr_text = run.find('.//w:instrText', namespaces=ns)
+            fld_char_separate = run.find('.//w:fldChar[@w:fldCharType="separate"]', namespaces=ns)
+            fld_char_end = run.find('.//w:fldChar[@w:fldCharType="end"]', namespaces=ns)
+            text_element = run.find('.//w:t', namespaces=ns)
+            
+            if fld_char_begin is not None:
+                in_field_hyperlink = True
+                hyperlink_data = {'url': None, 'text_runs': [], 'style': None}
+            
+            elif in_field_hyperlink and instr_text is not None and 'HYPERLINK' in instr_text.text:
+                match = re.search(r'HYPERLINK\s+"([^"]*)"', instr_text.text)
+                if match:
+                    hyperlink_data['url'] = match.group(1).strip()
+            
+            elif in_field_hyperlink and fld_char_separate is not None:
+                continue
+            
+            elif in_field_hyperlink and text_element is not None:
+                hyperlink_data['text_runs'].append(run)
+            
+            elif in_field_hyperlink and fld_char_end is not None:
+                process_field_hyperlink(hyperlink_data, new_paragraph)
+                in_field_hyperlink = False
+                hyperlink_data = {'url': None, 'text_runs': [], 'style': None}
+            
+            # Process regular text (before, between, or after hyperlinks)
+            if text_element is not None and text_element.text:
+                # Only process if not part of any hyperlink
+                if not in_field_hyperlink and not in_modern_hyperlink:
+                    process_regular_run(run, new_paragraph, ns)
+
+def process_modern_hyperlink(hyperlink, new_paragraph, ns):
+    part = new_paragraph.part
+    rels = part.rels
+    
+    # Generate unique rId
+    next_rId = f"rId{len(rels) + 1}"
+    
+    # Add relationship
+    rels.add_relationship(
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+        "http://www.google.com",  # Default URL
+        is_external=True,
+        rId=next_rId
+    )
+    
+    # Create hyperlink element
+    hyperlink_copy = OxmlElement('w:hyperlink')
+    hyperlink_copy.set(qn('r:id'), next_rId)
+    
+    # Copy all runs from original hyperlink
+    for run in hyperlink.xpath('.//w:r', namespaces=ns):
+        run_copy = OxmlElement('w:r')
+        for child in run:
+            run_copy.append(etree.fromstring(etree.tostring(child)))
+        
+        # Apply hyperlink formatting
+        rPr = run_copy.find('w:rPr', namespaces=ns) or OxmlElement('w:rPr')
+        
+        # Set default font (Times New Roman, 11pt)
+        font_name = OxmlElement('w:rFonts')
+        font_name.set(qn('w:ascii'), 'Times New Roman')
+        font_name.set(qn('w:hAnsi'), 'Times New Roman')
+        rPr.insert(0, font_name)
+        
+        font_size = OxmlElement('w:sz')
+        font_size.set(qn('w:val'), '22')  # 11pt = 22 half-points
+        rPr.append(font_size)
+        
+        # Hyperlink style
+        rStyle = OxmlElement('w:rStyle')
+        rStyle.set(qn('w:val'), 'Hyperlink')
+        rPr.insert(0, rStyle)
+        
+        # Blue text
+        color = OxmlElement('w:color')
+        color.set(qn('w:val'), '0000FF')
+        rPr.append(color)
+        
+        # Black underline
+        underline = OxmlElement('w:u')
+        underline.set(qn('w:val'), 'single')
+        underline.set(qn('w:color'), '000000')
+        rPr.append(underline)
+        
+        # Preserve original formatting if exists
+        original_rPr = run.find('w:rPr', namespaces=ns)
+        if original_rPr is not None:
+            # Copy bold/italic if present
+            if original_rPr.find('.//w:b', namespaces=ns) is not None:
+                bold = OxmlElement('w:b')
+                rPr.append(bold)
+            if original_rPr.find('.//w:i', namespaces=ns) is not None:
+                italic = OxmlElement('w:i')
+                rPr.append(italic)
+        
+        run_copy.insert(0, rPr)
+        hyperlink_copy.append(run_copy)
+    
+    new_paragraph._p.append(hyperlink_copy)
+
+def process_field_hyperlink(hyperlink_data, new_paragraph, ns):
+    if not hyperlink_data['url'] or not hyperlink_data['text_runs']:
+        return
+    
+    hyperlink_text = "".join([t.text for r in hyperlink_data['text_runs'] 
+                            if (t := r.find('./w:t', namespaces=ns)) is not None])
+    
+    # Create begin field char
+    begin_r = OxmlElement('w:r')
+    begin_fldChar = OxmlElement('w:fldChar')
+    begin_fldChar.set(qn('w:fldCharType'), 'begin')
+    begin_r.append(begin_fldChar)
+    new_paragraph._p.append(begin_r)
+    
+    # Create instrText run
+    instr_r = OxmlElement('w:r')
+    instr_text = OxmlElement('w:instrText')
+    instr_text.set(qn('xml:space'), 'preserve')
+    instr_text.text = f' HYPERLINK "{hyperlink_data["url"]}" '
+    instr_r.append(instr_text)
+    new_paragraph._p.append(instr_r)
+    
+    # Create separate field char
+    separate_r = OxmlElement('w:r')
+    separate_fldChar = OxmlElement('w:fldChar')
+    separate_fldChar.set(qn('w:fldCharType'), 'separate')
+    separate_r.append(separate_fldChar)
+    new_paragraph._p.append(separate_r)
+    
+    # Create hyperlink text run with style
+    text_r = OxmlElement('w:r')
+    rPr = OxmlElement('w:rPr')
+    
+    # Add hyperlink style if exists
+    if hyperlink_data['style']:
+        rStyle = OxmlElement('w:rStyle')
+        rStyle.set(qn('w:val'), hyperlink_data['style'])
+        rPr.append(rStyle)
+    
+    # Add formatting elements
+    font_size = OxmlElement('w:sz')
+    font_size.set(qn('w:val'), '22')  # 11pt = 22 half-points
+    rPr.append(font_size)
+    
+    color = OxmlElement('w:color')
+    color.set(qn('w:val'), '0000FF')  # Blue
+    rPr.append(color)
+    
+    underline = OxmlElement('w:u')
+    underline.set(qn('w:val'), 'single')
+    rPr.append(underline)
+    
+    text_r.append(rPr)
+    t = OxmlElement('w:t')
+    t.text = hyperlink_text
+    text_r.append(t)
+    new_paragraph._p.append(text_r)
+    
+    # Create end field char with same formatting
+    end_r = OxmlElement('w:r')
+    end_rPr = OxmlElement('w:rPr')
+    
+    if hyperlink_data['style']:
+        end_rStyle = OxmlElement('w:rStyle')
+        end_rStyle.set(qn('w:val'), hyperlink_data['style'])
+        end_rPr.append(end_rStyle)
+    
+    # Recreate formatting elements for end run
+    end_font_size = OxmlElement('w:sz')
+    end_font_size.set(qn('w:val'), '22')
+    end_rPr.append(end_font_size)
+    
+    end_color = OxmlElement('w:color')
+    end_color.set(qn('w:val'), '0000FF')
+    end_rPr.append(end_color)
+    
+    end_underline = OxmlElement('w:u')
+    end_underline.set(qn('w:val'), 'single')
+    end_rPr.append(end_underline)
+    
+    end_r.append(end_rPr)
+    end_fldChar = OxmlElement('w:fldChar')
+    end_fldChar.set(qn('w:fldCharType'), 'end')
+    end_r.append(end_fldChar)
+    new_paragraph._p.append(end_r)
+
+def process_regular_run(run, new_paragraph, ns):
+    text_element = run.find('.//w:t', namespaces=ns)
+    if text_element is not None and text_element.text:
+        new_run = new_paragraph.add_run(text_element.text)
+        
+        # Default formatting
+        new_run.font.name = "Times New Roman"
+        new_run.font.size = Pt(11)
+        
+        # Copy run formatting
+        rpr = run.find('.//w:rPr', namespaces=ns)
+        if rpr is not None:
+            # Color
+            color_element = rpr.find('.//w:color', namespaces=ns)
+            if color_element is not None and color_element.get(qn('w:val')):
+                color_hex = color_element.get(qn('w:val'))
+                try:
+                    new_run.font.color.rgb = RGBColor.from_string(color_hex)
+                except ValueError:
+                    pass
+
+            # Bold/Italic
+            if rpr.find('.//w:b', namespaces=ns) is not None:
+                new_run.bold = True
+            if rpr.find('.//w:i', namespaces=ns) is not None:
+                new_run.italic = True
+                
+            # Underline
+            underline_element = rpr.find('.//w:u', namespaces=ns)
+            if underline_element is not None:
+                underline_val = underline_element.get(qn('w:val'))
+                underline_mapping = {
+                    'single': WD_UNDERLINE.SINGLE,
+                    'double': WD_UNDERLINE.DOUBLE,
+                    'thick': WD_UNDERLINE.THICK,
+                    'dotted': WD_UNDERLINE.DOTTED,
+                    'dash': WD_UNDERLINE.DASH,
+                    'dotDash': WD_UNDERLINE.DOT_DASH,
+                    'dotDotDash': WD_UNDERLINE.DOT_DOT_DASH,
+                    'wave': WD_UNDERLINE.WAVY,
+                    'none': WD_UNDERLINE.NONE,
+                }
+                new_run.font.underline = underline_mapping.get(underline_val, WD_UNDERLINE.SINGLE)
+                
+                # Underline color
+                underline_color = underline_element.get(qn('w:color'))
+                if underline_color:
+                    try:
+                        new_run.font.underline_color.rgb = RGBColor.from_string(underline_color)
+                    except ValueError:
+                        pass
 
 def copy_row_formatting(source_row, target_row):
     namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
