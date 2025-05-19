@@ -1216,8 +1216,7 @@ async def validate_document(source_path):
             publishable_str = ', '.join(f"Publishable Matter {num}" for num in publisahble_matter_table_missing_numbers)
             # Construct the final message
             message = f"{publishable_str} was written wrong. Please rewrite it."
-            print(message)
-            return False
+            return False, message
     
     non_publisahble_matter_table_first_cell_texts = []
     for i in range(publishable_matter_list_length, matter_indices_length):
@@ -1243,8 +1242,7 @@ async def validate_document(source_path):
             non_publishable_str = ', '.join(f"Non-Publishable Matter {num}" for num in non_publisahble_matter_table_missing_numbers)
             # Construct the final message
             message = f"{non_publishable_str} was written wrong. Please rewrite it."
-            print(message)    
-            return False
+            return False, message
     
     if not publisahble_matter_table_missing_numbers and not non_publisahble_matter_table_missing_numbers:
         leadingPartner_indices = set()
@@ -1278,8 +1276,7 @@ async def validate_document(source_path):
         try:
             file_name_without_extension = os.path.splitext(source_path)[0]
             source_doc.save(f"{file_name_without_extension}_processed.docx")
-            print("Wrong tables fixed correctly.")
-            return True
+            return True, "The document is valid."
         except Exception as e:
             print(f"Error saving the document: {e}")
             sys.exit(1)

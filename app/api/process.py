@@ -14,7 +14,6 @@ from app.utils.l500_chamber_converter import (
     l500_chamber_convert,
     validate_document as validate_l500_chamber,
 )
-from app.utils.docx_to_pdf import convert_docx_to_pdf  # <-- You must implement this
 
 router = APIRouter()
 
@@ -31,31 +30,21 @@ async def convert_document_endpoint(
 
     try:
         if mode == "l500_chamber":
-            is_valid = await validate_l500_chamber(tmp_in_path)
+            is_valid, validation_message = await validate_l500_chamber(tmp_in_path)
             if not is_valid:
-                raise HTTPException(status_code=400, detail="Invalid L500 document")
+                raise HTTPException(status_code=400, detail=validation_message)
             template_path = Path(__file__).resolve().parent.parent / "utils" / "templateDestination.docx"
             output_path = await l500_chamber_convert(tmp_in_path, template_path)
 
         elif mode == "chamber_l500":
-            is_valid = await validate_chamber_l500(tmp_in_path)
+            is_valid, validation_message = await validate_chamber_l500(tmp_in_path)
             if not is_valid:
-                raise HTTPException(status_code=400, detail="Invalid Chamber document")
+                raise HTTPException(status_code=400, detail=validation_message)
             template_path = Path(__file__).resolve().parent.parent / "utils" / "legal 500.doc"
             output_path = await chamber_l500_convert(tmp_in_path, template_path)
 
         else:
             raise HTTPException(status_code=400, detail="Invalid conversion mode")
-
-        # PREVIEW: Convert DOCX to PDF and return that
-        if preview:
-            pdf_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
-            convert_docx_to_pdf(output_path, pdf_path)
-            return FileResponse(
-                pdf_path,
-                media_type="application/pdf",
-                filename="preview.pdf",
-            )
 
         # DOWNLOAD: Return the actual DOCX
         return FileResponse(
